@@ -47,6 +47,8 @@ export interface PetCase {
   urgency: 'low' | 'medium' | 'high'
   status: 'waiting' | 'diagnosing' | 'treating' | 'cured' | 'accident'
   examined: boolean
+  contract: OwnerContract
+  actionsTaken: ActionType[]
 }
 
 export interface Player {
@@ -61,6 +63,15 @@ export interface Player {
 export type ActionType = 'examine' | 'medicate' | 'inject' | 'feed' | 'isolate'
 export type AccidentType = 'split' | 'float' | 'bite'
 export type GamePhase = 'idle' | 'diagnosing' | 'treating' | 'accident' | 'result'
+export type OwnerPersonality = 'gentle' | 'impatient' | 'stingy' | 'generous' | 'suspicious'
+
+export interface OwnerContract {
+  personality: OwnerPersonality
+  budget: number
+  forbiddenActions: ActionType[]
+  forbiddenMedicines: string[]
+  satisfactionThreshold: number
+}
 
 export interface DiagnosisResult {
   success: boolean
@@ -75,6 +86,11 @@ export interface DiagnosisResult {
   damagedEquipment: string | null
   message: string
   errorType: 'action' | 'medicine' | 'funds' | null
+  contractViolated: boolean
+  contractViolationReason: string | null
+  bonus: number
+  satisfaction: number
+  settlement: 'bonus' | 'penalty' | 'normal'
 }
 
 export const breeds: Breed[] = [
@@ -156,6 +172,56 @@ export function getMedicine(id: string): Medicine | undefined {
   return medicines.find(m => m.id === id)
 }
 
+export const ownerPersonalityData: Record<OwnerPersonality, { label: string; emoji: string; description: string; budgetRange: [number, number]; forbidChance: number; satisfactionBase: number }> = {
+  gentle: { label: '温和型', emoji: '😊', description: '通情达理，容错率高', budgetRange: [50, 120], forbidChance: 0.15, satisfactionBase: 70 },
+  impatient: { label: '急躁型', emoji: '😤', description: '要求快速治疗，拖沓会不满', budgetRange: [40, 90], forbidChance: 0.25, satisfactionBase: 50 },
+  stingy: { label: '吝啬型', emoji: '🤑', description: '预算紧张，超支必投诉', budgetRange: [20, 60], forbidChance: 0.3, satisfactionBase: 40 },
+  generous: { label: '大方型', emoji: '🥰', description: '不惜代价治好宠物，有小费', budgetRange: [80, 200], forbidChance: 0.1, satisfactionBase: 80 },
+  suspicious: { label: '多疑型', emoji: '🤨', description: '多禁忌，违反必投诉', budgetRange: [40, 100], forbidChance: 0.5, satisfactionBase: 45 },
+}
+
+const allActionTypes: ActionType[] = ['examine', 'medicate', 'inject', 'feed', 'isolate']
+
+export function generateContract(): OwnerContract {
+  const personalities: OwnerPersonality[] = ['gentle', 'impatient', 'stingy', 'generous', 'suspicious']
+  const personality = personalities[Math.floor(Math.random() * personalities.length)]
+  const data = ownerPersonalityData[personality]
+
+  const budget = data.budgetRange[0] + Math.floor(Math.random() * (data.budgetRange[1] - data.budgetRange[0] + 1))
+
+  const forbiddenActions: ActionType[] = []
+  if (Math.random() < data.forbidChance) {
+    const candidate = allActionTypes[Math.floor(Math.random() * allActionTypes.length)]
+    if (candidate !== 'examine') {
+      forbiddenActions.push(candidate)
+    }
+  }
+  if (personality === 'suspicious' && Math.random() < 0.4) {
+    const extra = allActionTypes.filter(a => a !== 'examine' && !forbiddenActions.includes(a))
+    if (extra.length > 0) {
+      forbiddenActions.push(extra[Math.floor(Math.random() * extra.length)])
+    }
+  }
+
+  const forbiddenMedicines: string[] = []
+  if (Math.random() < data.forbidChance) {
+    const medId = medicines[Math.floor(Math.random() * medicines.length)].id
+    forbiddenMedicines.push(medId)
+  }
+
+  const satisfactionThreshold = data.satisfactionBase + Math.floor(Math.random() * 20)
+
+  return { personality, budget, forbiddenActions, forbiddenMedicines, satisfactionThreshold }
+}
+
+export function getPersonalityLabel(personality: OwnerPersonality): string {
+  return ownerPersonalityData[personality].label
+}
+
+export function getPersonalityEmoji(personality: OwnerPersonality): string {
+  return ownerPersonalityData[personality].emoji
+}
+
 let caseCounter = 0
 
 export function generatePetCase(): PetCase {
@@ -181,6 +247,8 @@ export function generatePetCase(): PetCase {
     urgency,
     status: 'waiting',
     examined: false,
+    contract: generateContract(),
+    actionsTaken: [],
   }
 }
 
@@ -200,6 +268,8 @@ export function generateTestCases(): PetCase[] {
       urgency: 'medium',
       status: 'waiting',
       examined: false,
+      contract: { personality: 'generous', budget: 120, forbiddenActions: [], forbiddenMedicines: [], satisfactionThreshold: 75 },
+      actionsTaken: [],
     },
     {
       id: `test_float_${Date.now()}_${caseCounter - 2}`,
@@ -210,6 +280,8 @@ export function generateTestCases(): PetCase[] {
       urgency: 'medium',
       status: 'waiting',
       examined: false,
+      contract: { personality: 'suspicious', budget: 60, forbiddenActions: ['inject'], forbiddenMedicines: ['stabilizer'], satisfactionThreshold: 55 },
+      actionsTaken: [],
     },
     {
       id: `test_shadow_${Date.now()}_${caseCounter - 1}`,
@@ -220,6 +292,8 @@ export function generateTestCases(): PetCase[] {
       urgency: 'medium',
       status: 'waiting',
       examined: false,
+      contract: { personality: 'stingy', budget: 40, forbiddenActions: ['isolate'], forbiddenMedicines: ['shine_serum'], satisfactionThreshold: 50 },
+      actionsTaken: [],
     },
     {
       id: `test_chomp_${Date.now()}_${caseCounter}`,
@@ -230,6 +304,8 @@ export function generateTestCases(): PetCase[] {
       urgency: 'medium',
       status: 'waiting',
       examined: false,
+      contract: { personality: 'impatient', budget: 80, forbiddenActions: [], forbiddenMedicines: ['gravity_pill'], satisfactionThreshold: 60 },
+      actionsTaken: [],
     },
   ]
 }

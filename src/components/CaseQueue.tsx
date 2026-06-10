@@ -1,6 +1,6 @@
 import { useGameStore } from '@/store/useGameStore'
-import { getBreed, getSymptomsForDisease, getDisease, getSymptom } from '@/data/gameData'
-import { AlertTriangle, Clock, ChevronRight } from 'lucide-react'
+import { getBreed, getSymptomsForDisease, getDisease, getSymptom, ownerPersonalityData } from '@/data/gameData'
+import { AlertTriangle, Clock, ChevronRight, FileText } from 'lucide-react'
 
 export default function CaseQueue() {
   const cases = useGameStore(s => s.cases)
@@ -77,6 +77,15 @@ export default function CaseQueue() {
                 {c.examined && (
                   <span className="text-[10px] text-cyan-400 bg-cyan-900/30 px-1.5 py-0.5 rounded">
                     已检查
+                  </span>
+                )}
+                <span className="inline-flex items-center gap-0.5 text-[10px] text-yellow-400 bg-yellow-900/20 px-1.5 py-0.5 rounded">
+                  {ownerPersonalityData[c.contract.personality].emoji}
+                  {ownerPersonalityData[c.contract.personality].label}
+                </span>
+                {(c.contract.forbiddenActions.length > 0 || c.contract.forbiddenMedicines.length > 0) && (
+                  <span className="inline-flex items-center gap-0.5 text-[10px] text-red-400 bg-red-900/20 px-1.5 py-0.5 rounded">
+                    <FileText className="w-2.5 h-2.5" />有禁忌
                   </span>
                 )}
               </div>

@@ -2,7 +2,7 @@ import { useGameStore } from '@/store/useGameStore'
 import { getBreed, medicines } from '@/data/gameData'
 import type { ActionType } from '@/data/gameData'
 import {
-  Search, Pill, Syringe, UtensilsCrossed, ShieldAlert, X
+  Search, Pill, Syringe, UtensilsCrossed, ShieldAlert, X, Ban
 } from 'lucide-react'
 
 const actions: { type: ActionType; label: string; icon: typeof Search; color: string; bgColor: string }[] = [
@@ -41,10 +41,16 @@ export default function TreatmentPanel() {
   function isActionAvailable(type: ActionType): boolean {
     if (isDisabled) return false
     const equip = equipment.find(e => e.requiredAction === type)
-    return equip?.status === 'normal'
+    if (equip?.status !== 'normal') return false
+    return true
+  }
+
+  function isActionForbidden(type: ActionType): boolean {
+    return activeCase?.contract.forbiddenActions.includes(type) || false
   }
 
   function handleAction(type: ActionType) {
+    if (!isActionAvailable(type)) return
     switch (type) {
       case 'examine': examine(); break
       case 'medicate': medicate(); break
@@ -70,26 +76,37 @@ export default function TreatmentPanel() {
       <div className="grid grid-cols-5 gap-2">
         {actions.map(({ type, label, icon: Icon, color, bgColor }) => {
           const available = isActionAvailable(type)
+          const forbidden = isActionForbidden(type)
           const equip = equipment.find(e => e.requiredAction === type)
+          const clickable = available
 
           return (
             <button
               key={type}
               onClick={() => handleAction(type)}
-              disabled={!available}
+              disabled={!clickable}
               className={`
                 relative flex flex-col items-center gap-1.5 p-3 rounded-xl transition-all duration-200
                 bg-gradient-to-b ${bgColor}
-                border ${available ? 'border-gray-700/50 hover:border-gray-600' : 'border-gray-800/30'}
-                ${available ? 'hover:scale-105 hover:shadow-lg cursor-pointer' : 'opacity-40 cursor-not-allowed'}
+                border ${forbidden ? 'border-red-500/60 ring-1 ring-red-500/30' : available ? 'border-gray-700/50 hover:border-gray-600' : 'border-gray-800/30'}
+                ${clickable ? 'hover:scale-105 hover:shadow-lg cursor-pointer' : 'opacity-40 cursor-not-allowed'}
                 ${type === 'examine' && activeCase.examined ? 'ring-1 ring-cyan-700/30' : ''}
               `}
             >
-              <Icon className={`w-5 h-5 ${available ? color : 'text-gray-600'}`} />
-              <span className={`text-[11px] font-medium ${available ? 'text-gray-300' : 'text-gray-600'}`}>
+              {forbidden && (
+                <div className="absolute -top-1.5 -right-1.5 flex items-center justify-center">
+                  <div className="absolute inset-0 bg-red-500 rounded-full animate-ping opacity-30" />
+                  <Ban className="relative w-4 h-4 text-red-400" />
+                </div>
+              )}
+              <Icon className={`w-5 h-5 ${forbidden ? 'text-red-400' : available ? color : 'text-gray-600'}`} />
+              <span className={`text-[11px] font-medium ${forbidden ? 'text-red-400' : available ? 'text-gray-300' : 'text-gray-600'}`}>
                 {label}
               </span>
-              {equip?.status === 'damaged' && (
+              {forbidden && (
+                <span className="text-[9px] text-red-500 font-medium tracking-wide">⚠ 违约</span>
+              )}
+              {equip?.status === 'damaged' && !forbidden && (
                 <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-pulse" />
               )}
             </button>
@@ -107,23 +124,38 @@ export default function TreatmentPanel() {
           </button>
           <h4 className="text-xs text-purple-400 mb-2 font-display tracking-wide">{selectorTitle}</h4>
           <div className="grid grid-cols-1 gap-1.5">
-            {medicines.map(med => (
-              <button
-                key={med.id}
-                onClick={() => selectMedicine(med.id)}
-                className="flex items-center gap-3 p-2 rounded-lg bg-gray-800/60 border border-gray-700/40 hover:border-purple-600/40 transition-all text-left"
-              >
-                <div
-                  className="w-3 h-3 rounded-full flex-shrink-0"
-                  style={{ backgroundColor: med.color, boxShadow: `0 0 8px ${med.color}40` }}
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs text-gray-200">{med.name}</div>
-                  <div className="text-[10px] text-gray-500">{med.effect}</div>
-                </div>
-                <span className="text-[10px] text-yellow-500">{med.cost} ⬡</span>
-              </button>
-            ))}
+            {medicines.map(med => {
+              const isForbidden = activeCase.contract.forbiddenMedicines.includes(med.id)
+              return (
+                <button
+                  key={med.id}
+                  onClick={() => selectMedicine(med.id)}
+                  className={`
+                    flex items-center gap-3 p-2 rounded-lg border transition-all text-left
+                    ${isForbidden
+                      ? 'bg-red-900/20 border-red-600/40 hover:border-red-500/60 hover:bg-red-900/30 cursor-pointer'
+                      : 'bg-gray-800/60 border-gray-700/40 hover:border-purple-600/40 cursor-pointer'
+                    }
+                  `}
+                >
+                  <div
+                    className={`w-3 h-3 rounded-full flex-shrink-0`}
+                    style={{ backgroundColor: med.color, boxShadow: `0 0 8px ${med.color}${isForbidden ? '20' : '40'}` }}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className={`text-xs ${isForbidden ? 'text-red-300' : 'text-gray-200'}`}>{med.name}</div>
+                    <div className="text-[10px] text-gray-500">{med.effect}</div>
+                  </div>
+                  {isForbidden ? (
+                    <span className="text-[10px] text-red-400 flex items-center gap-0.5 font-medium">
+                      <Ban className="w-2.5 h-2.5" />禁用违约
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-yellow-500">{med.cost} ⬡</span>
+                  )}
+                </button>
+              )
+            })}
           </div>
         </div>
       )}

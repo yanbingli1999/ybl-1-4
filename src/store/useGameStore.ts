@@ -7,12 +7,14 @@ import {
   type DiagnosisResult,
   type ActionType,
   type AccidentType,
+  type OwnerContract,
   initialEquipment,
   generatePetCase,
   generateInitialCases,
   generateTestCases,
   getDisease,
   getMedicine,
+  ownerPersonalityData,
 } from '@/data/gameData'
 
 interface GameState {
@@ -82,6 +84,39 @@ function getActionLabel(action: ActionType): string {
   }
 }
 
+function calculateSatisfaction(
+  contract: OwnerContract,
+  isCorrect: boolean,
+  actionsTaken: ActionType[],
+  totalCost: number,
+): number {
+  const data = ownerPersonalityData[contract.personality]
+  let satisfaction = data.satisfactionBase
+
+  if (isCorrect) {
+    satisfaction += 25
+    if (contract.personality === 'generous') satisfaction += 10
+  } else {
+    satisfaction -= 30
+  }
+
+  if (totalCost > contract.budget) {
+    const overPercent = ((totalCost - contract.budget) / contract.budget) * 100
+    satisfaction -= Math.min(40, overPercent)
+  }
+
+  if (contract.personality === 'impatient') {
+    if (actionsTaken.length > 2) satisfaction -= (actionsTaken.length - 2) * 10
+  }
+
+  const forbiddenUsedActions = actionsTaken.filter(a => contract.forbiddenActions.includes(a))
+  if (forbiddenUsedActions.length > 0) {
+    satisfaction -= forbiddenUsedActions.length * 25
+  }
+
+  return Math.max(0, Math.min(100, satisfaction))
+}
+
 export const useGameStore = create<GameState>((set, get) => ({
   cases: generateInitialCases(5),
   activeCaseId: null,
@@ -123,7 +158,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     if (state.actionCooldowns.examine > Date.now()) return
 
     const updatedCases = state.cases.map(c =>
-      c.id === activeCase.id ? { ...c, examined: true } : c
+      c.id === activeCase.id ? { ...c, examined: true, actionsTaken: [...c.actionsTaken, 'examine' as ActionType] } : c
     )
 
     set({
@@ -173,6 +208,11 @@ export const useGameStore = create<GameState>((set, get) => ({
         damagedEquipment: null,
         message: `星币不足！${medicine.name} 需要 ${medicine.cost} ⬡，你只有 ${state.player.coins} ⬡`,
         errorType: 'funds',
+        contractViolated: false,
+        contractViolationReason: null,
+        bonus: 0,
+        satisfaction: 0,
+        settlement: 'normal',
       }
 
       set({
@@ -203,17 +243,33 @@ export const useGameStore = create<GameState>((set, get) => ({
     const requiredEquip = state.equipment.find(e => e.requiredAction === action)
     if (requiredEquip?.status !== 'normal') return
 
+    const contract = activeCase.contract
+    const allActionsTaken = [...activeCase.actionsTaken, action]
+
     const actionCorrect = action === disease.correctAction
     const needsMedicine = disease.medicineId !== null
     const medicine = medicineId ? getMedicine(medicineId) : null
     const medicineCorrect = !needsMedicine || (medicineId !== undefined && medicineId === disease.medicineId)
     const medicineCost = medicine?.cost || 0
 
+    const actionForbidden = contract.forbiddenActions.includes(action)
+    const medicineForbidden = medicineId ? contract.forbiddenMedicines.includes(medicineId) : false
+    const contractViolated = actionForbidden || medicineForbidden
+
+    let contractViolationReason: string | null = null
+    if (actionForbidden) {
+      contractViolationReason = `违反合同禁令：宠主禁止使用「${getActionLabel(action)}」`
+    } else if (medicineForbidden && medicine) {
+      contractViolationReason = `违反合同禁令：宠主禁止使用「${medicine.name}」`
+    }
+
     let errorType: 'action' | 'medicine' | null = null
     if (!actionCorrect) errorType = 'action'
     else if (actionCorrect && !medicineCorrect) errorType = 'medicine'
 
     const isCorrect = actionCorrect && medicineCorrect
+
+    const totalCost = medicineCost
 
     if (isCorrect) {
       const coinsEarned = getCoinsForUrgency(activeCase.urgency)
@@ -228,10 +284,43 @@ export const useGameStore = create<GameState>((set, get) => ({
         c.id === activeCase.id ? { ...c, status: 'cured' as const } : c
       )
 
+      const satisfaction = calculateSatisfaction(contract, true, allActionsTaken, totalCost)
+      const personalityData = ownerPersonalityData[contract.personality]
+
+      let bonus = 0
+      let settlement: 'bonus' | 'penalty' | 'normal' = 'normal'
+
+      if (contractViolated) {
+        settlement = 'penalty'
+        bonus = 0
+        if (contract.personality === 'suspicious') {
+          bonus = -30
+        } else if (contract.personality === 'stingy') {
+          bonus = -20
+        } else {
+          bonus = -15
+        }
+      } else if (satisfaction >= contract.satisfactionThreshold) {
+        settlement = 'bonus'
+        if (contract.personality === 'generous') {
+          bonus = Math.floor(coinsEarned * 0.5)
+        } else if (contract.personality === 'gentle') {
+          bonus = Math.floor(coinsEarned * 0.2)
+        } else {
+          bonus = Math.floor(coinsEarned * 0.15)
+        }
+      } else if (totalCost > contract.budget) {
+        settlement = 'penalty'
+        bonus = -Math.floor((totalCost - contract.budget) * 0.5)
+      }
+
       const itemType = action === 'feed' ? '食物' : action === 'inject' ? '注射剂' : '药品'
       let message = `诊断正确！${activeCase.petName} 的「${disease.name}」已治愈！`
       if (medicineCost > 0) {
         message += `（扣除${itemType}费 ${medicineCost} ⬡）`
+      }
+      if (contractViolated) {
+        message += ` ⚠ 但因违反合同禁令，宠主已投诉！`
       }
 
       const result: DiagnosisResult = {
@@ -241,23 +330,28 @@ export const useGameStore = create<GameState>((set, get) => ({
         correctAction: disease.correctAction,
         medicineUsed: medicineId || null,
         correctMedicine: disease.medicineId,
-        coinsEarned: netCoins,
+        coinsEarned: netCoins + bonus,
         medicineCost,
         accidentType: null,
         damagedEquipment: null,
         message,
         errorType: null,
+        contractViolated,
+        contractViolationReason,
+        bonus,
+        satisfaction,
+        settlement,
       }
 
       set({
         cases: updatedCases,
         player: {
           ...state.player,
-          coins: state.player.coins + netCoins,
+          coins: state.player.coins + netCoins + bonus,
           level: newLevel,
           exp: newExpAfterLevel,
           cured: state.player.cured + 1,
-          totalIncome: state.player.totalIncome + coinsEarned,
+          totalIncome: state.player.totalIncome + coinsEarned + Math.max(0, bonus),
         },
         gamePhase: 'result',
         diagnosisResult: result,
@@ -282,6 +376,20 @@ export const useGameStore = create<GameState>((set, get) => ({
           )
         : state.equipment
 
+      const satisfaction = calculateSatisfaction(contract, false, allActionsTaken, totalCost)
+      let bonus = 0
+      let settlement: 'bonus' | 'penalty' | 'normal' = 'penalty'
+
+      if (contractViolated) {
+        if (contract.personality === 'suspicious') {
+          bonus = -20
+        } else if (contract.personality === 'stingy') {
+          bonus = -15
+        } else {
+          bonus = -10
+        }
+      }
+
       let message = ''
       const itemType = action === 'feed' ? '食物' : action === 'inject' ? '注射剂' : '药品'
       if (errorType === 'action') {
@@ -294,6 +402,9 @@ export const useGameStore = create<GameState>((set, get) => ({
         const usedMed = medicineId ? getMedicine(medicineId) : null
         message = `用错${itemType}了！${activeCase.petName} 患的是「${disease.name}」，应该用「${correctMed?.name || '正确物品'}」而不是「${usedMed?.name || '未知物品'}」！（扣除${itemType}费 ${medicineCost} ⬡）`
       }
+      if (contractViolated) {
+        message += ` ⚠ 此外还违反了合同禁令，额外罚款！`
+      }
 
       const result: DiagnosisResult = {
         success: false,
@@ -302,12 +413,17 @@ export const useGameStore = create<GameState>((set, get) => ({
         correctAction: disease.correctAction,
         medicineUsed: medicineId || null,
         correctMedicine: disease.medicineId,
-        coinsEarned: -totalDeduction,
+        coinsEarned: -totalDeduction + bonus,
         medicineCost,
         accidentType: disease.accidentType,
         damagedEquipment: damagedEquipId,
         message,
         errorType,
+        contractViolated,
+        contractViolationReason,
+        bonus,
+        satisfaction,
+        settlement,
       }
 
       set({
@@ -315,7 +431,7 @@ export const useGameStore = create<GameState>((set, get) => ({
         equipment: updatedEquipment,
         player: {
           ...state.player,
-          coins: Math.max(0, state.player.coins - totalDeduction),
+          coins: Math.max(0, state.player.coins - totalDeduction + bonus),
           misdiagnosed: state.player.misdiagnosed + 1,
         },
         gamePhase: 'accident',
@@ -362,17 +478,9 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   dismissAccident: () => {
     const state = get()
-    const remainingCases = state.cases.filter(c => c.status !== 'cured' && c.status !== 'accident')
-    while (remainingCases.length < 4) {
-      remainingCases.push(generatePetCase())
-    }
-
     set({
-      activeCaseId: null,
-      gamePhase: 'idle',
+      gamePhase: 'result',
       accidentType: null,
-      diagnosisResult: null,
-      cases: remainingCases,
     })
   },
 

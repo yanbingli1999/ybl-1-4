@@ -5,6 +5,7 @@ import AccidentOverlay from '@/components/AccidentOverlay'
 import EquipmentPanel from '@/components/EquipmentPanel'
 import PlayerProgress from '@/components/PlayerProgress'
 import DiagnosisResult from '@/components/DiagnosisResult'
+import ContractCard from '@/components/ContractCard'
 import { useGameStore } from '@/store/useGameStore'
 import { getBreed } from '@/data/gameData'
 import { Cross, Zap, FlaskConical } from 'lucide-react'
@@ -81,6 +82,7 @@ export default function Home() {
                     </div>
                   </div>
                   <SymptomCard />
+                  <ContractCard />
                   <TreatmentPanel />
                 </>
               ) : (
