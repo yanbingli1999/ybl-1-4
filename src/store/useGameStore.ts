@@ -300,6 +300,9 @@ export const useGameStore = create<GameState>((set, get) => ({
         } else {
           bonus = -15
         }
+      } else if (totalCost > contract.budget) {
+        settlement = 'penalty'
+        bonus = -Math.floor((totalCost - contract.budget) * 0.5)
       } else if (satisfaction >= contract.satisfactionThreshold) {
         settlement = 'bonus'
         if (contract.personality === 'generous') {
@@ -309,9 +312,6 @@ export const useGameStore = create<GameState>((set, get) => ({
         } else {
           bonus = Math.floor(coinsEarned * 0.15)
         }
-      } else if (totalCost > contract.budget) {
-        settlement = 'penalty'
-        bonus = -Math.floor((totalCost - contract.budget) * 0.5)
       }
 
       const itemType = action === 'feed' ? '食物' : action === 'inject' ? '注射剂' : '药品'
@@ -321,6 +321,8 @@ export const useGameStore = create<GameState>((set, get) => ({
       }
       if (contractViolated) {
         message += ` ⚠ 但因违反合同禁令，宠主已投诉！`
+      } else if (totalCost > contract.budget) {
+        message += ` ⚠ 治疗费用超出宠主预算！`
       }
 
       const result: DiagnosisResult = {
